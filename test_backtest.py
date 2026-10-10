@@ -4,31 +4,29 @@ from datetime import datetime, timedelta
 
 BASE_URL = "https://iss.moex.com/iss"
 
-INITIAL_CAPITAL = 100_000  # 100 000 RUB de départ
+# ⚙️ PARAMÈTRES CORRIGÉS : 5/20 (comme le bot live)
+INITIAL_CAPITAL = 100_000
+FAST = 5
+SLOW = 20
 
 
-def get_history(ticker, days=180):
-    """Récupère l'historique des cours."""
+def get_history(ticker, days=365):
     end = datetime.now()
     start = end - timedelta(days=days)
-
     url = (
         f"{BASE_URL}/history/engines/stock/markets/shares/boards/TQBR/"
         f"securities/{ticker}.json"
         f"?from={start.strftime('%Y-%m-%d')}"
         f"&till={end.strftime('%Y-%m-%d')}"
     )
-
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         data = r.json()
-
         columns = data["history"]["columns"]
         rows = data["history"]["data"]
         if not rows:
             return None
-
         df = pd.DataFrame(rows, columns=columns)
         df = df[["TRADEDATE", "CLOSE"]].dropna()
         df["CLOSE"] = df["CLOSE"].astype(float)
@@ -39,8 +37,8 @@ def get_history(ticker, days=180):
         return None
 
 
-def backtest(ticker, fast=9, slow=30):
-    """Simule la stratégie SMA sur l'historique."""
+def backtest(ticker, fast=FAST, slow=SLOW):
+    """Backtest avec les paramètres 5/20."""
     df = get_history(ticker, days=365)
 
     if df is None or len(df) < slow + 5:
@@ -50,9 +48,8 @@ def backtest(ticker, fast=9, slow=30):
     df["SMA_FAST"] = df["CLOSE"].rolling(fast).mean()
     df["SMA_SLOW"] = df["CLOSE"].rolling(slow).mean()
 
-    # Simulation
     capital = INITIAL_CAPITAL
-    position = 0        # nombre d'actions détenues
+    position = 0
     buy_price = 0
     trades = []
 
@@ -60,11 +57,10 @@ def backtest(ticker, fast=9, slow=30):
         row = df.iloc[i]
         prev = df.iloc[i - 1]
 
-        # Vérifie qu'on a les deux SMA
         if pd.isna(row["SMA_FAST"]) or pd.isna(row["SMA_SLOW"]):
             continue
 
-        # Croisement HAUSSIER → on achète
+        # Croisement HAUSSIER → achat
         if (prev["SMA_FAST"] <= prev["SMA_SLOW"]
                 and row["SMA_FAST"] > row["SMA_SLOW"]
                 and position == 0):
@@ -73,7 +69,7 @@ def backtest(ticker, fast=9, slow=30):
             trades.append(("ACHAT", row["TRADEDATE"], row["CLOSE"]))
             capital = 0
 
-        # Croisement BAISSIER → on vend
+        # Croisement BAISSIER → vente
         elif (prev["SMA_FAST"] >= prev["SMA_SLOW"]
                 and row["SMA_FAST"] < row["SMA_SLOW"]
                 and position > 0):
@@ -105,7 +101,7 @@ def backtest(ticker, fast=9, slow=30):
 
 
 def main():
-    print("🇷🇺 Backtest de la stratégie SMA 9/30")
+    print(f"🇷🇺 Backtest de la stratégie SMA {FAST}/{SLOW}")
     print("=" * 55)
 
     tickers = ["SBER", "GAZP", "LKOH", "ROSN", "GMKN", "NVTK", "TATN"]
