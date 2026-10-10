@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Trading — Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #1e293b;
+        }
+        h1 {
+            font-size: 24px;
+            background: linear-gradient(90deg, #38bdf8, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .timestamp { color: #64748b; font-size: 13px; }
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+        }
+        .card-label {
+            color: #94a3b8;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        .card-value { font-size: 24px; font-weight: 700; }
+        .green { color: #4ade80; }
+        .red { color: #f87171; }
+        .neutral { color: #e2e8f0; }
+        h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #cbd5e1;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #334155;
+        }
+        th {
+            background: #0f172a;
+            color: #94a3b8;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        td { font-size: 14px; }
+        tr:last-child td { border-bottom: none; }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-buy { background: #065f46; color: #6ee7b7; }
+        .badge-sell { background: #7f1d1d; color: #fca5a5; }
+        .badge-stop { background: #78350f; color: #fdba74; }
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: #64748b;
+            font-style: italic;
+        }
+        footer {
+            text-align: center;
+            color: #64748b;
+            font-size: 12px;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🇷🇺 Bot Trading — Dashboard</h1>
+            <div class="timestamp">Dernière mise à jour : {{ now }}</div>
+        </header>
+
+        <div class="cards">
+            <div class="card">
+                <div class="card-label">Capital liquide</div>
+                <div class="card-value neutral">{{ "{:,.0f}".format(capital) }} ₽</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Valeur totale</div>
+                <div class="card-value neutral">{{ "{:,.0f}".format(total_valeur) }} ₽</div>
+            </div>
+            <div class="card">
+                <div class="card-label">PnL</div>
+                <div class="card-value {% if pnl >= 0 %}green{% else %}red{% endif %}">
+                    {{ "{:+,.0f}".format(pnl) }} ₽
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-label">Performance</div>
+                <div class="card-value {% if pnl_pct >= 0 %}green{% else %}red{% endif %}">
+                    {{ "{:+.2f}".format(pnl_pct) }} %
+                </div>
+            </div>
+        </div>
+
+        <h2>📊 Positions ouvertes</h2>
+        {% if positions %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Quantité</th>
+                    <th>Prix d'achat</th>
+                    <th>Valeur</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in positions %}
+                <tr>
+                    <td><strong>{{ pos.ticker }}</strong></td>
+                    <td>{{ "{:.2f}".format(pos.quantite) }}</td>
+                    <td>{{ "{:.2f}".format(pos.prix_achat) }} ₽</td>
+                    <td>{{ "{:,.0f}".format(pos.valeur) }} ₽</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">Aucune position ouverte pour le moment.</div>
+        {% endif %}
+
+        <h2>📜 Historique récent</h2>
+        {% if historique %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Ticker</th>
+                    <th>Action</th>
+                    <th>Prix</th>
+                    <th>PnL</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in historique %}
+                <tr>
+                    <td>{{ h.date[:16].replace('T', ' ') }}</td>
+                    <td><strong>{{ h.ticker }}</strong></td>
+                    <td>
+                        {% if h.action == "ACHAT" %}
+                        <span class="badge badge-buy">ACHAT</span>
+                        {% elif h.action == "VENTE" %}
+                        <span class="badge badge-sell">VENTE</span>
+                        {% elif h.action == "STOP-LOSS" %}
+                        <span class="badge badge-stop">STOP-LOSS</span>
+                        {% else %}
+                        <span class="badge">{{ h.action }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ "{:.2f}".format(h.prix) }} ₽</td>
+                    <td>
+                        {% if h.pnl_pct is not none %}
+                        <span class="{% if h.pnl_pct >= 0 %}green{% else %}red{% endif %}">
+                            {{ "{:+.2f}".format(h.pnl_pct) }} %
+                        </span>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">Aucun trade enregistré pour le moment.</div>
+        {% endif %}
+
+        <footer>
+            Dashboard local — Bot Trading MOEX · Flask
+        </footer>
+    </div>
+</body>
+</html>
