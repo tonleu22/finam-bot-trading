@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bot Trading — Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -96,19 +97,50 @@
             color: #64748b;
             font-style: italic;
         }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .chart-card {
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+        }
+        .chart-card h3 {
+            font-size: 15px;
+            margin-bottom: 15px;
+            color: #cbd5e1;
+        }
         footer {
             text-align: center;
             color: #64748b;
             font-size: 12px;
             margin-top: 30px;
         }
+        .refresh {
+            background: #1e293b;
+            color: #38bdf8;
+            border: 1px solid #334155;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .refresh:hover { background: #334155; }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>🇷🇺 Bot Trading — Dashboard</h1>
-            <div class="timestamp">Dernière mise à jour : {{ now }}</div>
+            <div>
+                <button class="refresh" onclick="location.reload()">🔄 Rafraîchir</button>
+                <span class="timestamp" style="margin-left: 15px;">MAJ : {{ now }}</span>
+            </div>
         </header>
 
         <div class="cards">
@@ -132,6 +164,16 @@
                     {{ "{:+.2f}".format(pnl_pct) }} %
                 </div>
             </div>
+        </div>
+
+        <h2>📈 Prix sur 30 jours</h2>
+        <div class="charts-grid">
+            {% for ticker in tickers_graphique %}
+            <div class="chart-card">
+                <h3>{{ ticker }}</h3>
+                <canvas id="chart-{{ ticker }}" height="150"></canvas>
+            </div>
+            {% endfor %}
         </div>
 
         <h2>📊 Positions ouvertes</h2>
@@ -207,8 +249,74 @@
         {% endif %}
 
         <footer>
-            Dashboard local — Bot Trading MOEX · Flask
+            Dashboard local — Bot Trading MOEX · Flask + Chart.js
         </footer>
     </div>
+
+    <script>
+        const tickers = {{ tickers_graphique | tojson }};
+
+        async function chargerGraphique(ticker) {
+            try {
+                const resp = await fetch(`/api/historique/${ticker}`);
+                const json = await resp.json();
+                const data = json.data;
+
+                if (!data || data.length === 0) return;
+
+                const labels = data.map(d => d.TRADEDATE);
+                const prix = data.map(d => d.CLOSE);
+
+                const ctx = document.getElementById(`chart-${ticker}`).getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: `${ticker} (RUB)`,
+                            data: prix,
+                            borderColor: '#38bdf8',
+                            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: '#1e293b',
+                                borderColor: '#334155',
+                                borderWidth: 1,
+                                titleColor: '#e2e8f0',
+                                bodyColor: '#cbd5e1',
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 6 },
+                                grid: { color: '#1e293b' }
+                            },
+                            y: {
+                                ticks: { color: '#64748b', font: { size: 10 } },
+                                grid: { color: '#1e293b' }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error(`Erreur graphique ${ticker}:`, e);
+            }
+        }
+
+        tickers.forEach(chargerGraphique);
+
+        // Auto-refresh toutes les 30 secondes
+        setTimeout(() => location.reload(), 30000);
+    </script>
 </body>
 </html>
