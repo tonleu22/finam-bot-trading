@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import json
 import os
+import csv
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -15,15 +16,15 @@ SLOW = 20
 INITIAL_CAPITAL = 100_000
 COMMISSION = 0.0005
 STOP_LOSS = 0.05
-CYCLE_SECONDS = 300   # 5 minutes entre chaque cycle
+CYCLE_SECONDS = 300
 
 TICKERS = ["SBER", "GAZP", "LKOH", "ROSN", "GMKN", "NVTK", "TATN"]
 
-# Telegram
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 PORTFOLIO_FILE = "portefeuille.json"
+TRADES_FILE = "trades.csv"
 
 
 def send_telegram(message):
@@ -42,6 +43,23 @@ def send_telegram(message):
             print(f"⚠️  Erreur Telegram : {r.status_code}")
     except Exception as e:
         print(f"⚠️  Telegram erreur : {e}")
+
+
+def log_trade(ticker, action, prix, quantite, pnl_pct=None):
+    """Enregistre un trade dans le fichier CSV."""
+    fichier_existe = os.path.exists(TRADES_FILE)
+    with open(TRADES_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if not fichier_existe:
+            writer.writerow(["Date", "Ticker", "Action", "Prix", "Quantite", "PnL_%"])
+        writer.writerow([
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ticker,
+            action,
+            f"{prix:.2f}",
+            f"{quantite:.2f}" if quantite else "",
+            f"{pnl_pct:.2f}" if pnl_pct is not None else "",
+        ])
 
 
 def load_portfolio():
@@ -162,6 +180,7 @@ def check_signals(p):
                 )
                 print(f"\n   🛑 STOP-LOSS sur {ticker} à {prix:.2f} ({pnl:+.2f}%)")
                 send_telegram(msg)
+                log_trade(ticker, "STOP-LOSS", prix, pos["quantite"], pnl)
                 del p["positions"][ticker]
 
             # Vente
@@ -183,6 +202,7 @@ def check_signals(p):
                 )
                 print(f"\n   🔴 VENTE de {ticker} à {prix:.2f} ({pnl:+.2f}%)")
                 send_telegram(msg)
+                log_trade(ticker, "VENTE", prix, pos["quantite"], pnl)
                 del p["positions"][ticker]
 
         # --- NOUVELLE POSITION ---
@@ -209,6 +229,7 @@ def check_signals(p):
             )
             print(f"\n   🟢 ACHAT de {ticker} à {prix:.2f} ({quantite:.2f} actions)")
             send_telegram(msg)
+            log_trade(ticker, "ACHAT", prix, quantite)
 
     return prix_actuels
 
@@ -237,7 +258,7 @@ def main():
 
         try:
             prix_actuels = check_signals(p)
-            total_valeur, total_pnl = afficher_portefeuille(p, prix_actuels)
+            afficher_portefeuille(p, prix_actuels)
             save_portfolio(p)
         except Exception as e:
             print(f"❌ Erreur dans le cycle : {e}")

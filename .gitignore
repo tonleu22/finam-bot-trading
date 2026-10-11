@@ -3,3 +3,4 @@ venv/
 __pycache__/ 
 *.pyc 
 portefeuille.json 
+trades.csv 
