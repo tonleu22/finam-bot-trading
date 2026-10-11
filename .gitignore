@@ -4,3 +4,9 @@ __pycache__/
 *.pyc 
 portefeuille.json 
 trades.csv 
+dernier_resume.txt 
+portefeuille_ia.json 
+discussions.log 
+trades.csv 
+analyses_news.log 
+dernier_briefing.txt 
