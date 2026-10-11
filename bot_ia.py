@@ -18,6 +18,9 @@ COMMISSION = 0.0005
 STOP_LOSS = 0.05
 CYCLE_SECONDS = 300
 
+# 🎯 MODE CONSENSUS : SMA + IA doivent être d'accord
+CONSENSUS_MODE = True
+
 TICKERS = ["SBER", "GAZP", "LKOH", "ROSN", "GMKN", "NVTK", "TATN"]
 
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -39,7 +42,6 @@ def send_telegram(message):
 
 
 def log_discussion(texte):
-    """Enregistre une discussion dans le fichier log."""
     with open(DISCUSSIONS_FILE, "a", encoding="utf-8") as f:
         f.write(f"\n{'='*60}\n")
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -48,7 +50,6 @@ def log_discussion(texte):
 
 
 def ask_gigachat(prompt):
-    """Demande l'avis de GigaChat sur une situation de trading."""
     try:
         with GigaChat(
             credentials=GIGA_KEY,
@@ -59,6 +60,22 @@ def ask_gigachat(prompt):
             return response.choices[0].message.content
     except Exception as e:
         return f"❌ Erreur GigaChat : {e}"
+
+
+def parse_avis_ia(texte):
+    """Analyse la réponse de GigaChat pour détecter la décision."""
+    if not texte:
+        return "INCONNU"
+    texte_lower = texte.lower()
+
+    # On cherche en priorité les mots-clés forts
+    if "acheter" in texte_lower or "achat" in texte_lower or "acheter" in texte_lower:
+        return "ACHETER"
+    if "vendre" in texte_lower or "vente" in texte_lower:
+        return "VENDRE"
+    if "attendre" in texte_lower or "attends" in texte_lower or "neutre" in texte_lower:
+        return "ATTENDRE"
+    return "INCONNU"
 
 
 def load_portfolio():
@@ -101,7 +118,6 @@ def get_history(ticker, days=60):
 
 
 def construire_prompt(ticker, prix, fast, slow, signal, historique_prix):
-    """Construit le prompt pour GigaChat."""
     dernieres_prix = ", ".join([f"{p:.2f}" for p in historique_prix[-10:]])
     return f"""Tu es un analyste de trading. Voici les données d'une action russe :
 
@@ -112,14 +128,17 @@ Moyenne mobile lente (SMA {SLOW}) : {slow:.2f}
 Signal technique : {signal}
 10 derniers prix : {dernieres_prix}
 
-Réponds en 2 phrases maximum, en français :
-1. Ton avis sur ce signal (ACHETER, VENDRE, ou ATTENDRE)
-2. Une justification courte
+Réponds STRICTEMENT dans ce format :
+1. DÉCISION : ACHETER, VENDRE ou ATTENDRE
+2. JUSTIFICATION : une phrase courte
+
+Exemple :
+1. DÉCISION : ACHETER
+2. JUSTIFICATION : Le croisement haussier est confirmé.
 """
 
 
 def check_signals_ia(p):
-    """Vérifie les signaux et consulte GigaChat."""
     prix_actuels = {}
 
     for ticker in TICKERS:
@@ -144,44 +163,57 @@ def check_signals_ia(p):
         prev_fast = prev["SMA_FAST"]
         prev_slow = prev["SMA_SLOW"]
 
-        achat = prev_fast <= prev_slow and fast > slow
-        vente = prev_fast >= prev_slow and fast < slow
+        achat_sma = prev_fast <= prev_slow and fast > slow
+        vente_sma = prev_fast >= prev_slow and fast < slow
 
-        # Si pas de signal, on continue
-        if not achat and not vente:
+        if not achat_sma and not vente_sma:
             continue
 
-        signal_str = "ACHAT" if achat else "VENTE"
+        signal_sma = "ACHAT" if achat_sma else "VENTE"
 
         # --- CONSULTATION DE L'IA ---
-        print(f"\n🧠 Consultation de GigaChat pour {ticker} ({signal_str})...")
+        print(f"\n🧠 Consultation GigaChat pour {ticker} ({signal_sma})...")
         prompt = construire_prompt(
-            ticker, prix, fast, slow, signal_str,
+            ticker, prix, fast, slow, signal_sma,
             list(df["CLOSE"].values)
         )
-        avis_ia = ask_gigachat(prompt)
-        print(f"🤖 GigaChat : {avis_ia}")
+        reponse_ia = ask_gigachat(prompt)
+        avis_ia = parse_avis_ia(reponse_ia)
+        print(f"🤖 GigaChat ({avis_ia}) : {reponse_ia[:150]}")
 
-        # Enregistrer la discussion
+        # --- CONSENSUS ---
+        accord = (
+            (signal_sma == "ACHAT" and avis_ia == "ACHETER") or
+            (signal_sma == "VENTE" and avis_ia == "VENDRE")
+        )
+
+        if CONSENSUS_MODE and not accord:
+            print(f"   ⚪ PAS DE CONSENSUS → aucune action")
+            log_discussion(
+                f"📊 SIGNAL : {signal_sma} sur {ticker}\n"
+                f"   Prix : {prix:.2f} RUB\n"
+                f"   SMA {FAST} : {fast:.2f} | SMA {SLOW} : {slow:.2f}\n\n"
+                f"🧠 PROMPT :\n{prompt}\n\n"
+                f"🤖 RÉPONSE :\n{reponse_ia}\n\n"
+                f"🎯 DÉCISION BOT : ⚪ AUCUNE (pas de consensus)"
+            )
+            send_telegram(
+                f"⚪ Pas de consensus sur {ticker}\n"
+                f"SMA dit {signal_sma} | IA dit {avis_ia}\n"
+                f"→ Aucune action"
+            )
+            continue
+
+        # --- CONSENSUS OK → TRADE ---
+        print(f"   ✅ CONSENSUS → {signal_sma}")
         log_discussion(
-            f"📊 SIGNAL : {signal_str} sur {ticker}\n"
+            f"📊 SIGNAL : {signal_sma} sur {ticker}\n"
             f"   Prix : {prix:.2f} RUB\n"
             f"   SMA {FAST} : {fast:.2f} | SMA {SLOW} : {slow:.2f}\n\n"
-            f"🧠 PROMPT envoyé à GigaChat :\n{prompt}\n\n"
-            f"🤖 RÉPONSE de GigaChat :\n{avis_ia}"
+            f"🧠 PROMPT :\n{prompt}\n\n"
+            f"🤖 RÉPONSE :\n{reponse_ia}\n\n"
+            f"🎯 DÉCISION BOT : ✅ {signal_sma} (consensus)"
         )
-
-        # Message Telegram
-        msg = (
-            f"🧠 Signal {signal_str} sur {ticker}\n"
-            f"Prix : {prix:.2f} RUB\n\n"
-            f"🤖 GigaChat dit :\n{avis_ia}"
-        )
-        send_telegram(msg)
-
-        # --- DÉCISION ---
-        # Le bot suit le signal technique (SMA) pour l'instant,
-        # mais on enregistre l'avis de l'IA pour analyse
 
         # --- POSITION EXISTANTE ---
         if ticker in p["positions"]:
@@ -194,26 +226,27 @@ def check_signals_ia(p):
                 p["historique"].append({
                     "date": datetime.now().isoformat(),
                     "ticker": ticker, "action": "STOP-LOSS",
-                    "prix": prix, "pnl_pct": pnl, "avis_ia": avis_ia[:100],
+                    "prix": prix, "pnl_pct": pnl, "avis_ia": avis_ia,
                 })
                 print(f"   🛑 STOP-LOSS {ticker} ({pnl:+.2f}%)")
                 send_telegram(f"🛑 STOP-LOSS {ticker} : {pnl:+.2f}%")
                 del p["positions"][ticker]
 
-            elif vente:
+            elif vente_sma:
                 montant = pos["quantite"] * prix * (1 - COMMISSION)
                 p["capital"] += montant
                 pnl = (prix - pos["prix_achat"]) / pos["prix_achat"] * 100
                 p["historique"].append({
                     "date": datetime.now().isoformat(),
                     "ticker": ticker, "action": "VENTE",
-                    "prix": prix, "pnl_pct": pnl, "avis_ia": avis_ia[:100],
+                    "prix": prix, "pnl_pct": pnl, "avis_ia": avis_ia,
                 })
                 print(f"   🔴 VENTE {ticker} ({pnl:+.2f}%)")
+                send_telegram(f"🔴 VENTE {ticker}\nPnL : {pnl:+.2f}%\nIA : {avis_ia}")
                 del p["positions"][ticker]
 
         # --- NOUVELLE POSITION ---
-        elif achat and p["capital"] > 1000:
+        elif achat_sma and p["capital"] > 1000:
             montant = p["capital"] * 0.2
             quantite = (montant * (1 - COMMISSION)) / prix
             p["capital"] -= montant
@@ -223,10 +256,15 @@ def check_signals_ia(p):
             p["historique"].append({
                 "date": datetime.now().isoformat(),
                 "ticker": ticker, "action": "ACHAT",
-                "prix": prix, "pnl_pct": None, "avis_ia": avis_ia[:100],
+                "prix": prix, "pnl_pct": None, "avis_ia": avis_ia,
             })
             print(f"   🟢 ACHAT {ticker} ({quantite:.2f} actions)")
-            send_telegram(f"🟢 ACHAT {ticker} à {prix:.2f}")
+            send_telegram(
+                f"🟢 ACHAT {ticker}\n"
+                f"Prix : {prix:.2f} RUB\n"
+                f"Quantité : {quantite:.2f} actions\n"
+                f"✅ Consensus SMA + IA"
+            )
 
     return prix_actuels
 
@@ -247,12 +285,13 @@ def afficher_portefeuille(p):
 def main():
     p = load_portfolio()
 
-    print("🧠 Bot IA — SMA 5/20 + GigaChat")
+    mode = "CONSENSUS (SMA + IA)" if CONSENSUS_MODE else "SMA seule"
+    print(f"🧠 Bot IA — Mode : {mode}")
     print(f"   Capital : {INITIAL_CAPITAL:,} RUB")
     print(f"   Cycle : {CYCLE_SECONDS}s")
     print("=" * 55)
 
-    send_telegram("🧠 Bot IA démarré (SMA + GigaChat)")
+    send_telegram(f"🧠 Bot IA démarré — Mode : {mode}")
 
     cycle = 0
     while True:
